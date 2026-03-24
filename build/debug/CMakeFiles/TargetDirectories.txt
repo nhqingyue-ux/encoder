@@ -1,3 +1,0 @@
-/Users/nhqy/Documents/dev/encoder/build/debug/CMakeFiles/SDKExample.elf.dir
-/Users/nhqy/Documents/dev/encoder/build/debug/CMakeFiles/edit_cache.dir
-/Users/nhqy/Documents/dev/encoder/build/debug/CMakeFiles/rebuild_cache.dir
