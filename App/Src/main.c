@@ -10,6 +10,7 @@
 #include "lvgl/lvgl.h"
 #include "lv_port.h"
 #include "ui_menu.h"
+#include "comm.h"
 
 /* ── Forward declarations ──────────────────────────────────────────── */
 void SystemClock_Config(void);
@@ -39,6 +40,8 @@ int main(void)
 
     Encoder_Init();
     LOG_Printf("[BOOT] Encoder init done\r\n");
+
+    COMM_Init();
 
     /* Set LCD brightness */
     LCD_BrightnessInit(BrightnessTable[2]);  /* default: level 2 = 60% */

@@ -59,6 +59,7 @@ set(APP_SOURCES
 set(PORT_SOURCES
     "Port/Src/lv_port.c"
     "Port/Src/uart_log.c"
+    "Port/Src/comm.c"
     "Port/Src/stm32g0xx_hal_msp.c"
 )
 

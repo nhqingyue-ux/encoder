@@ -13,6 +13,7 @@
 #include "lvgl/lvgl.h"
 #include "SDK.h"
 #include "main.h"
+#include "comm.h"
 
 /* ── Constants ───────────────────────────────────────────────────────── */
 #define INDICATOR_HOLD_MS  400   /* how long indicator stays visible */
@@ -114,13 +115,16 @@ static void enc_event_cb(lv_event_t *e)
         uint32_t key = lv_event_get_key(e);
         if (key == LV_KEY_RIGHT) {
             trigger_indicator(STATE_RIGHT);
+            COMM_SendRight();
             LOG_Printf("[ENC] R\r\n");
         } else if (key == LV_KEY_LEFT) {
             trigger_indicator(STATE_LEFT);
+            COMM_SendLeft();
             LOG_Printf("[ENC] L\r\n");
         }
     } else if (code == LV_EVENT_CLICKED || code == LV_EVENT_PRESSED) {
         trigger_indicator(STATE_YES);
+        COMM_SendYes();
         LOG_Printf("[ENC] Y\r\n");
     }
 }
