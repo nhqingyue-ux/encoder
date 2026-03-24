@@ -98,7 +98,7 @@
 /*====================
    WIDGETS (only what we need)
  *====================*/
-#define LV_USE_ARC          0
+#define LV_USE_ARC          1
 #define LV_USE_BAR          1
 #define LV_USE_BTN          1
 #define LV_USE_BTNMATRIX    0
