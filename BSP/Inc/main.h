@@ -36,8 +36,13 @@ extern "C" {
 /* Exported macro ------------------------------------------------------------*/
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
-void LOG_Init(void);
-int  LOG_Printf(const char *fmt, ...);
+
+/* Debug logging — disabled in release builds (NDEBUG defined by -Os -DNDEBUG) */
+#ifdef NDEBUG
+  #define LOG_Printf(...)     ((void)0)
+#else
+  int  LOG_Printf(const char *fmt, ...);
+#endif
 
 
 /* Private defines -----------------------------------------------------------*/

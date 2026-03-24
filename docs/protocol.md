@@ -20,10 +20,10 @@ and debuggability.
 | RX pin | PB9 (USART3_RX, AF4) |
 | Direction | Encoder → Host (TX only, RX reserved) |
 
-> **Note**: USART3 is shared with debug logging. Protocol messages are
-> single uppercase letters (`R`, `L`, `Y`); debug logs always start with `[`.
-> The host parser should only react to known command bytes and ignore all
-> other traffic.
+> **Note**: In debug builds (`-Og -DDEBUG`), USART3 also carries debug log
+> messages (always start with `[`). In release builds (`-Os -DNDEBUG`),
+> debug logging is compiled out — USART3 carries **only** protocol messages.
+> The host parser should still ignore unknown bytes for robustness.
 
 ## Message Format
 

@@ -24,7 +24,7 @@ int main(void)
     HAL_Init();
     SystemClock_Config();
 
-    LOG_Init();
+    COMM_Init();  /* USART3 hardware — must be first for LOG_Printf */
     LOG_Printf("\r\n[BOOT] encoder demo start\r\n");
 
     MX_GPIO_Init();
@@ -40,8 +40,6 @@ int main(void)
 
     Encoder_Init();
     LOG_Printf("[BOOT] Encoder init done\r\n");
-
-    COMM_Init();
 
     /* Set LCD brightness */
     LCD_BrightnessInit(BrightnessTable[2]);  /* default: level 2 = 60% */
