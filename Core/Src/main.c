@@ -9508,8 +9508,11 @@ int main(void)
 	LOG_Printf("[BOOT] Brightness=%d\r\n", BrightnessTable[Parm[3]]);
 
 	/* ── LVGL init ───────────────────────────────── */
+	LOG_Printf("[LVGL] lv_init...\r\n");
 	lv_init();
+	LOG_Printf("[LVGL] lv_port_init...\r\n");
 	lv_port_init();
+	LOG_Printf("[LVGL] ui_menu_init...\r\n");
 	ui_menu_init();
 	LOG_Printf("[MAIN] LVGL ready, entering main loop\r\n");
 

@@ -13,7 +13,7 @@ set(CMAKE_C_FLAGS   "${COMMON_FLAGS} -std=gnu11")
 set(CMAKE_ASM_FLAGS "${MCU_FLAGS} -x assembler-with-cpp")
 
 set(CMAKE_C_FLAGS_DEBUG   "-Og -g3 -DDEBUG")
-set(CMAKE_C_FLAGS_RELEASE "-O2 -DNDEBUG")
+set(CMAKE_C_FLAGS_RELEASE "-Os -DNDEBUG")
 
 # ── Linker flags ─────────────────────────────────────────────────
 set(CMAKE_EXE_LINKER_FLAGS

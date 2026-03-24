@@ -20,7 +20,7 @@
    MEMORY SETTINGS
  *====================*/
 #define LV_MEM_CUSTOM      0
-#define LV_MEM_SIZE        (6 * 1024U)   /* 6KB internal heap */
+#define LV_MEM_SIZE        (12 * 1024U)  /* 12KB internal heap */
 #define LV_MEM_ADR         0
 #define LV_MEM_AUTO_DEFRAG 1
 #define LV_MEM_BUF_MAX_NUM 16
