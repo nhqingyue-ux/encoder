@@ -17,13 +17,61 @@ set(CMAKE_C_FLAGS_RELEASE "-Os -DNDEBUG")
 
 # ── Linker flags ─────────────────────────────────────────────────
 set(CMAKE_EXE_LINKER_FLAGS
-    "${MCU_FLAGS} -T${LINKER_SCRIPT} -specs=nano.specs -specs=nosys.specs -lc -lm -lgcc \
-     -Wl,--gc-sections -Wl,-Map=${PROJECT_BINARY_DIR}/${PROJECT_NAME}.map,--cref \
+    "${MCU_FLAGS} -T${LINKER_SCRIPT} \
+     -specs=nano.specs -specs=nosys.specs -lc -lm -lgcc \
+     -Wl,--gc-sections -Wl,-Map=${CMAKE_BINARY_DIR}/${PROJECT_NAME}.map,--cref \
      -Wl,--print-memory-usage"
 )
 
-# ── HAL sources ──────────────────────────────────────────────────
-file(GLOB HAL_SRCS
+# ── Include directories ─────────────────────────────────────────
+include_directories(
+    # Application
+    "App/Inc"
+    # Port / Middleware adaptation
+    "Port/Inc"
+    # BSP (board support)
+    "BSP/Inc"
+    # HAL
+    "Drivers/STM32G0xx_HAL_Driver/Inc"
+    "Drivers/CMSIS/Include"
+    "Drivers/CMSIS/Core/Include"
+    "Drivers/CMSIS/Device/ST/STM32G0xx/Include"
+    # LVGL
+    "Middlewares"
+    "Middlewares/lvgl"
+)
+
+# ── Compile definitions ─────────────────────────────────────────
+add_definitions(
+    -DUSE_HAL_DRIVER
+    -DSTM32G070xx
+)
+
+# ── Source files ─────────────────────────────────────────────────
+
+# App layer
+set(APP_SOURCES
+    "App/Src/main.c"
+    "App/Src/ui_menu.c"
+)
+
+# Port layer (middleware adaptation + debug)
+set(PORT_SOURCES
+    "Port/Src/lv_port.c"
+    "Port/Src/uart_log.c"
+    "Port/Src/stm32g0xx_hal_msp.c"
+)
+
+# BSP layer (startup, system, interrupts, syscalls)
+set(BSP_SOURCES
+    "BSP/Src/startup_stm32g070xx.s"
+    "BSP/Src/system_stm32g0xx.c"
+    "BSP/Src/stm32g0xx_it.c"
+    "BSP/Src/syscalls.c"
+)
+
+# HAL drivers
+set(HAL_SOURCES
     "Drivers/STM32G0xx_HAL_Driver/Src/stm32g0xx_hal.c"
     "Drivers/STM32G0xx_HAL_Driver/Src/stm32g0xx_hal_cortex.c"
     "Drivers/STM32G0xx_HAL_Driver/Src/stm32g0xx_hal_dma.c"
@@ -46,74 +94,45 @@ file(GLOB HAL_SRCS
     "Drivers/STM32G0xx_HAL_Driver/Src/stm32g0xx_hal_usart_ex.c"
 )
 
-# ── LVGL sources ─────────────────────────────────────────────────
-# Core + draw + font + hal + misc + widgets (base)
-file(GLOB_RECURSE LVGL_CORE_SRCS
-    "Middlewares/lvgl/src/core/*.c"
-    "Middlewares/lvgl/src/draw/*.c"
-    "Middlewares/lvgl/src/font/*.c"
-    "Middlewares/lvgl/src/hal/*.c"
-    "Middlewares/lvgl/src/misc/*.c"
-    "Middlewares/lvgl/src/widgets/*.c"
-)
-# Only the extra modules we actually use
-file(GLOB LVGL_EXTRA_SRCS
-    "Middlewares/lvgl/src/extra/lv_extra.c"
-    "Middlewares/lvgl/src/extra/layouts/flex/lv_flex.c"
-    "Middlewares/lvgl/src/extra/layouts/grid/lv_grid.c"
-    "Middlewares/lvgl/src/extra/themes/basic/lv_theme_basic.c"
-    "Middlewares/lvgl/src/extra/widgets/list/lv_list.c"
-    "Middlewares/lvgl/src/extra/widgets/spinner/lv_spinner.c"
-)
-set(LVGL_SRCS ${LVGL_CORE_SRCS} ${LVGL_EXTRA_SRCS})
+# LVGL sources (v8.3.11) — core modules only, no extra widgets
+file(GLOB_RECURSE LVGL_CORE_SRC    "Middlewares/lvgl/src/core/*.c")
+file(GLOB_RECURSE LVGL_DRAW_SRC    "Middlewares/lvgl/src/draw/*.c")
+file(GLOB_RECURSE LVGL_FONT_SRC    "Middlewares/lvgl/src/font/*.c")
+file(GLOB_RECURSE LVGL_HAL_SRC     "Middlewares/lvgl/src/hal/*.c")
+file(GLOB_RECURSE LVGL_MISC_SRC    "Middlewares/lvgl/src/misc/*.c")
+file(GLOB_RECURSE LVGL_WIDGET_SRC  "Middlewares/lvgl/src/widgets/*.c")
+file(GLOB_RECURSE LVGL_EXTRA_SRC   "Middlewares/lvgl/src/extra/*.c")
 
-# ── Application sources ──────────────────────────────────────────
-set(APP_SRCS
-    Core/Src/main.c
-    Core/Src/stm32g0xx_it.c
-    Core/Src/stm32g0xx_hal_msp.c
-    Core/Src/system_stm32g0xx.c
-    Core/Src/startup_stm32g070xx.s
-    Core/Src/syscalls.c
-    Core/Src/uart_log.c
-    Core/Src/lv_port.c
-    Core/Src/ui_menu.c
+# Exclude extra widgets that depend on disabled features (LV_USE_DROPDOWN=0, etc.)
+list(FILTER LVGL_EXTRA_SRC EXCLUDE REGEX "extra/widgets/(calendar|menu|meter|msgbox|span|spinbox|tabview|tileview|win)/")
+
+set(LVGL_SOURCES
+    ${LVGL_CORE_SRC}
+    ${LVGL_DRAW_SRC}
+    ${LVGL_FONT_SRC}
+    ${LVGL_HAL_SRC}
+    ${LVGL_MISC_SRC}
+    ${LVGL_WIDGET_SRC}
+    ${LVGL_EXTRA_SRC}
 )
 
 # ── Executable ───────────────────────────────────────────────────
 add_executable(${PROJECT_NAME}.elf
-    ${APP_SRCS}
-    ${HAL_SRCS}
-    ${LVGL_SRCS}
+    ${APP_SOURCES}
+    ${PORT_SOURCES}
+    ${BSP_SOURCES}
+    ${HAL_SOURCES}
+    ${LVGL_SOURCES}
 )
 
-# ── Precompiled SDK library ───────────────────────────────────────
+# ── Link SDK library ────────────────────────────────────────────
 target_link_libraries(${PROJECT_NAME}.elf
-    "${CMAKE_SOURCE_DIR}/Core/Src/SDK_fixed.lib"
+    "${CMAKE_SOURCE_DIR}/BSP/Lib/SDK_fixed.lib"
 )
 
-# ── Include paths ─────────────────────────────────────────────────
-target_include_directories(${PROJECT_NAME}.elf PRIVATE
-    Core/Inc
-    Drivers/STM32G0xx_HAL_Driver/Inc
-    Drivers/STM32G0xx_HAL_Driver/Inc/Legacy
-    Drivers/CMSIS/Device/ST/STM32G0xx/Include
-    Drivers/CMSIS/Core/Include
-    Middlewares                      # for #include "lvgl/lvgl.h"
-    Middlewares/lvgl                 # for lv_conf.h lookup
-)
-
-# ── Preprocessor defines ─────────────────────────────────────────
-target_compile_definitions(${PROJECT_NAME}.elf PRIVATE
-    STM32G070xx
-    USE_HAL_DRIVER
-    BURN_IMG42
-)
-
-# ── Post-build: generate .bin and .hex ───────────────────────────
+# ── Post-build: generate HEX and BIN ────────────────────────────
 add_custom_command(TARGET ${PROJECT_NAME}.elf POST_BUILD
-    COMMAND ${CMAKE_OBJCOPY} -O ihex   $<TARGET_FILE:${PROJECT_NAME}.elf> ${PROJECT_BINARY_DIR}/${PROJECT_NAME}.hex
-    COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:${PROJECT_NAME}.elf> ${PROJECT_BINARY_DIR}/${PROJECT_NAME}.bin
-    COMMAND ${CMAKE_SIZE} $<TARGET_FILE:${PROJECT_NAME}.elf>
+    COMMAND ${CMAKE_OBJCOPY} -O ihex   $<TARGET_FILE:${PROJECT_NAME}.elf> ${CMAKE_BINARY_DIR}/${PROJECT_NAME}.hex
+    COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:${PROJECT_NAME}.elf> ${CMAKE_BINARY_DIR}/${PROJECT_NAME}.bin
     COMMENT "Generating HEX and BIN files"
 )
