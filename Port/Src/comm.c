@@ -37,11 +37,23 @@ void COMM_Init(void)
     HAL_UART_Init(&huart3);
 }
 
-static void send_cmd(const char *cmd, uint8_t len)
+static void send_str(const char *s, uint8_t len)
 {
-    HAL_UART_Transmit(&huart3, (uint8_t *)cmd, len, 10);
+    HAL_UART_Transmit(&huart3, (uint8_t *)s, len, 10);
 }
 
-void COMM_SendRight(void) { send_cmd("R\n", 2); }
-void COMM_SendLeft(void)  { send_cmd("L\n", 2); }
-void COMM_SendYes(void)   { send_cmd("Y\n", 2); }
+void COMM_SendRight(void) { send_str("R\n", 2); }
+void COMM_SendLeft(void)  { send_str("L\n", 2); }
+void COMM_SendYes(void)   { send_str("Y\n", 2); }
+
+void COMM_Poll(void)
+{
+    /* Non-blocking check: is there a byte waiting? */
+    if (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_RXNE)) {
+        uint8_t rx = (uint8_t)(huart3.Instance->RDR & 0xFF);
+        if (rx == '?') {
+            send_str("OK\n", 3);
+        }
+        /* ignore all other incoming bytes */
+    }
+}

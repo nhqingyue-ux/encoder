@@ -13,6 +13,7 @@ extern "C" {
  */
 
 void COMM_Init(void);
+void COMM_Poll(void);        /* call in main loop — checks for incoming commands */
 void COMM_SendRight(void);   /* sends "R\n" */
 void COMM_SendLeft(void);    /* sends "L\n" */
 void COMM_SendYes(void);     /* sends "Y\n" */

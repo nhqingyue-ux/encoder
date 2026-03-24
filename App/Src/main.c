@@ -70,6 +70,9 @@ int main(void)
             lv_port_enc_update(delta, sw);
         }
 
+        /* ── Check for host commands (ping) ────────────────────────── */
+        COMM_Poll();
+
         /* ── LVGL tick + handler ───────────────────────────────────── */
         lv_timer_handler();
     }

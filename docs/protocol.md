@@ -37,11 +37,23 @@ No header, no length, no CRC. The newline serves as the message delimiter.
 
 ## Commands
 
+### Encoder → Host
+
 | Byte | ASCII | Meaning | Trigger |
 |------|-------|---------|---------|
 | 0x52 | `R` | Right | Clockwise rotation (one detent) |
 | 0x4C | `L` | Left | Counter-clockwise rotation (one detent) |
 | 0x59 | `Y` | Yes | Button press (falling edge) |
+
+### Host → Encoder
+
+| Byte | ASCII | Meaning | Response |
+|------|-------|---------|----------|
+| 0x3F | `?` | Ping / health check | `OK\n` |
+
+The ping command allows the host to verify that the encoder is alive and
+the UART link is working. Send `?` (with or without `\n`); the encoder
+replies `OK\n` within one main-loop cycle (~1ms).
 
 ## Timing
 
@@ -68,6 +80,7 @@ Encoder rotated counter-clockwise 2 clicks:
 ## Host Parsing (Pseudocode)
 
 ```c
+// Receive events from encoder
 char c = uart_read_byte();
 switch (c) {
     case 'R': handle_right(); break;
@@ -75,6 +88,14 @@ switch (c) {
     case 'Y': handle_yes();   break;
     case '\n': break;  // delimiter, ignore
     default:   break;  // unknown, ignore
+}
+
+// Health check (send once on startup or periodically)
+uart_write('?');
+char resp[4];
+uart_read_line(resp, sizeof(resp), timeout_ms=100);
+if (strcmp(resp, "OK") == 0) {
+    // encoder is alive
 }
 ```
 
