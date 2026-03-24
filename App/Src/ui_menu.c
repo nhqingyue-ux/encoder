@@ -1,15 +1,12 @@
 /**
- * ui_menu.c - LVGL menu for round 240x240 encoder controller
+ * ui_menu.c - Encoder input indicator for round 240x240 display
  *
- * Design for circular display:
- *   - Main screen: center-focused carousel, 3 visible items
- *     (selected item large in center, neighbors smaller above/below)
- *   - Sub screen:  arc indicator for parameter value
- *   - All elements stay within r=110 safe zone
+ * Shows directional feedback on circular LCD:
+ *   Clockwise rotation  → "R" (Right)
+ *   Counter-clockwise   → "L" (Left)
+ *   Button press        → "Y" (Yes/Confirm)
  *
- * Navigation:
- *   Rotate encoder → cycle through items / adjust value
- *   Press SW       → enter sub-screen / back to main
+ * Each indicator displays briefly then fades back to idle.
  */
 #include "ui_menu.h"
 #include "lv_port.h"
@@ -18,276 +15,190 @@
 #include "main.h"
 
 /* ── Constants ───────────────────────────────────────────────────────── */
-#define SCREEN_SIZE     240
-#define CENTER          120
-#define MENU_ITEM_COUNT 5
-
-/* ── Menu definition ─────────────────────────────────────────────────── */
-typedef struct {
-    const char *name;
-    const char *icon;
-    uint8_t     val;
-    uint8_t     min;
-    uint8_t     max;
-    const char *unit;
-} MenuItem;
-
-static MenuItem items[MENU_ITEM_COUNT] = {
-    { "Fan",         LV_SYMBOL_REFRESH,    3,  0,  5, "lv" },
-    { "AC Mode",     LV_SYMBOL_LOOP,       8,  0, 12, ""   },
-    { "Temp",        LV_SYMBOL_UP,        24, 16, 30, "\xc2\xb0""C" },
-    { "Bright",      LV_SYMBOL_EYE_OPEN,   2,  0,  5, ""   },
-    { "Volume",      LV_SYMBOL_VOLUME_MAX,  6,  0, 10, ""  },
-};
-
-/* ── State ───────────────────────────────────────────────────────────── */
-static lv_obj_t  *scr_main = NULL;
-static lv_obj_t  *scr_sub  = NULL;
-static lv_group_t *group   = NULL;
-static uint8_t    sel      = 0;   /* selected item index */
-
-/* Main screen objects */
-static lv_obj_t *main_icon_lbl  = NULL;   /* center icon */
-static lv_obj_t *main_name_lbl  = NULL;   /* center name */
-static lv_obj_t *main_val_lbl   = NULL;   /* center value */
-static lv_obj_t *main_prev_lbl  = NULL;   /* previous item (top) */
-static lv_obj_t *main_next_lbl  = NULL;   /* next item (bottom) */
-static lv_obj_t *main_dot[MENU_ITEM_COUNT]; /* dot indicators */
-static lv_obj_t *main_focus_btn = NULL;   /* invisible focusable btn */
-
-/* Sub screen objects */
-static lv_obj_t *sub_title_lbl  = NULL;
-static lv_obj_t *sub_val_lbl    = NULL;
-static lv_obj_t *sub_arc        = NULL;
-static lv_obj_t *sub_focus_btn  = NULL;   /* invisible focusable btn */
+#define INDICATOR_HOLD_MS  400   /* how long indicator stays visible */
 
 /* ── Colors ──────────────────────────────────────────────────────────── */
-#define COL_BG       0x0a0a1a
-#define COL_TEXT     0xe0e0ff
-#define COL_DIM      0x555577
-#define COL_ACCENT   0x53c8f5
-#define COL_ARC_BG   0x1a1a3e
-#define COL_ARC_IND  0x533483
-#define COL_DOT_ACT  0x53c8f5
-#define COL_DOT_DIM  0x333355
+#define COL_BG          0x0a0a1a
+#define COL_IDLE        0x333355
+#define COL_RIGHT       0x00cc88   /* green-cyan for R */
+#define COL_LEFT        0x5588ff   /* blue for L */
+#define COL_YES         0xff8800   /* orange for Y */
+#define COL_TEXT_DIM    0x555577
+#define COL_RING        0x1a1a3e
 
-/* ── Helpers ─────────────────────────────────────────────────────────── */
+/* ── State ───────────────────────────────────────────────────────────── */
+typedef enum {
+    STATE_IDLE = 0,
+    STATE_RIGHT,
+    STATE_LEFT,
+    STATE_YES,
+} IndicatorState;
 
-static void refresh_main_screen(void)
+static IndicatorState cur_state = STATE_IDLE;
+
+/* ── LVGL objects ────────────────────────────────────────────────────── */
+static lv_obj_t *scr        = NULL;
+static lv_obj_t *ring_arc   = NULL;   /* decorative ring */
+static lv_obj_t *big_lbl    = NULL;   /* big letter: R / L / Y / - */
+static lv_obj_t *desc_lbl   = NULL;   /* description: Right / Left / Yes / Idle */
+static lv_obj_t *hint_lbl   = NULL;   /* bottom hint */
+static lv_obj_t *focus_btn  = NULL;   /* invisible encoder target */
+static lv_timer_t *fade_tmr = NULL;   /* timer to return to idle */
+
+/* ── Idle text ───────────────────────────────────────────────────────── */
+static const char *idle_char = "-";
+static const char *idle_desc = "Ready";
+
+/* ── Update display ──────────────────────────────────────────────────── */
+
+static void set_indicator(IndicatorState st)
 {
-    MenuItem *m = &items[sel];
+    cur_state = st;
+    uint32_t color;
+    const char *ch;
+    const char *desc;
 
-    /* Center item */
-    lv_label_set_text(main_icon_lbl, m->icon);
-    lv_label_set_text(main_name_lbl, m->name);
+    switch (st) {
+    case STATE_RIGHT:
+        color = COL_RIGHT; ch = "R"; desc = "Right";  break;
+    case STATE_LEFT:
+        color = COL_LEFT;  ch = "L"; desc = "Left";   break;
+    case STATE_YES:
+        color = COL_YES;   ch = "Y"; desc = "Yes";    break;
+    default:
+        color = COL_IDLE;  ch = idle_char; desc = idle_desc; break;
+    }
 
-    char buf[16];
-    lv_snprintf(buf, sizeof(buf), "%d %s", m->val, m->unit);
-    lv_label_set_text(main_val_lbl, buf);
+    lv_label_set_text(big_lbl, ch);
+    lv_obj_set_style_text_color(big_lbl, lv_color_hex(color), 0);
 
-    /* Previous item (above) */
-    uint8_t prev = (sel == 0) ? MENU_ITEM_COUNT - 1 : sel - 1;
-    lv_snprintf(buf, sizeof(buf), "%s %s", items[prev].icon, items[prev].name);
-    lv_label_set_text(main_prev_lbl, buf);
+    lv_label_set_text(desc_lbl, desc);
+    lv_obj_set_style_text_color(desc_lbl, lv_color_hex(color), 0);
 
-    /* Next item (below) */
-    uint8_t next = (sel + 1) % MENU_ITEM_COUNT;
-    lv_snprintf(buf, sizeof(buf), "%s %s", items[next].icon, items[next].name);
-    lv_label_set_text(main_next_lbl, buf);
-
-    /* Dot indicators */
-    uint8_t i;
-    for (i = 0; i < MENU_ITEM_COUNT; i++) {
-        lv_obj_set_style_bg_color(main_dot[i],
-            lv_color_hex(i == sel ? COL_DOT_ACT : COL_DOT_DIM), 0);
+    /* Animate the ring arc */
+    if (st != STATE_IDLE) {
+        lv_obj_set_style_arc_color(ring_arc, lv_color_hex(color), LV_PART_INDICATOR);
+        lv_arc_set_value(ring_arc, 100);
+    } else {
+        lv_obj_set_style_arc_color(ring_arc, lv_color_hex(COL_RING), LV_PART_INDICATOR);
+        lv_arc_set_value(ring_arc, 0);
     }
 }
 
-/* ── Callbacks ───────────────────────────────────────────────────────── */
+static void fade_timer_cb(lv_timer_t *tmr)
+{
+    (void)tmr;
+    set_indicator(STATE_IDLE);
+    /* one-shot: pause until next event */
+    lv_timer_pause(fade_tmr);
+}
 
-static void main_event_cb(lv_event_t *e)
+static void trigger_indicator(IndicatorState st)
+{
+    set_indicator(st);
+
+    /* Reset fade timer */
+    if (fade_tmr) {
+        lv_timer_reset(fade_tmr);
+        lv_timer_resume(fade_tmr);
+    }
+}
+
+/* ── Encoder event handler ───────────────────────────────────────────── */
+
+static void enc_event_cb(lv_event_t *e)
 {
     lv_event_code_t code = lv_event_get_code(e);
 
     if (code == LV_EVENT_KEY) {
         uint32_t key = lv_event_get_key(e);
         if (key == LV_KEY_RIGHT) {
-            sel = (sel + 1) % MENU_ITEM_COUNT;
-            refresh_main_screen();
+            trigger_indicator(STATE_RIGHT);
+            LOG_Printf("[ENC] R\r\n");
         } else if (key == LV_KEY_LEFT) {
-            sel = (sel == 0) ? MENU_ITEM_COUNT - 1 : sel - 1;
-            refresh_main_screen();
+            trigger_indicator(STATE_LEFT);
+            LOG_Printf("[ENC] L\r\n");
         }
     } else if (code == LV_EVENT_CLICKED || code == LV_EVENT_PRESSED) {
-        /* Enter sub screen */
-        MenuItem *m = &items[sel];
-        lv_label_set_text(sub_title_lbl, m->name);
-        lv_arc_set_range(sub_arc, m->min, m->max);
-        lv_arc_set_value(sub_arc, m->val);
-
-        char buf[16];
-        lv_snprintf(buf, sizeof(buf), "%d %s", m->val, m->unit);
-        lv_label_set_text(sub_val_lbl, buf);
-
-        lv_group_remove_all_objs(group);
-        lv_group_add_obj(group, sub_arc);
-        lv_group_focus_obj(sub_arc);
-        lv_scr_load(scr_sub);
-        LOG_Printf("[UI] Enter: %s\r\n", m->name);
+        trigger_indicator(STATE_YES);
+        LOG_Printf("[ENC] Y\r\n");
     }
 }
 
-static void sub_arc_event_cb(lv_event_t *e)
+/* ── Build screen ────────────────────────────────────────────────────── */
+
+static void build_screen(void)
 {
-    lv_event_code_t code = lv_event_get_code(e);
+    scr = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(scr, lv_color_hex(COL_BG), 0);
+    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(scr, 0, 0);
+    lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
-    if (code == LV_EVENT_VALUE_CHANGED) {
-        int16_t v = lv_arc_get_value(sub_arc);
-        items[sel].val = (uint8_t)v;
+    /* ── Decorative ring (full circle arc) ───────────────── */
+    ring_arc = lv_arc_create(scr);
+    lv_obj_set_size(ring_arc, 210, 210);
+    lv_obj_align(ring_arc, LV_ALIGN_CENTER, 0, 0);
+    lv_arc_set_rotation(ring_arc, 270);
+    lv_arc_set_bg_angles(ring_arc, 0, 360);
+    lv_arc_set_range(ring_arc, 0, 100);
+    lv_arc_set_value(ring_arc, 0);
+    lv_obj_set_style_arc_width(ring_arc, 6, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(ring_arc, lv_color_hex(COL_RING), LV_PART_MAIN);
+    lv_obj_set_style_arc_width(ring_arc, 6, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(ring_arc, lv_color_hex(COL_RING), LV_PART_INDICATOR);
+    /* Hide knob */
+    lv_obj_set_style_pad_all(ring_arc, 0, LV_PART_KNOB);
+    lv_obj_set_style_bg_opa(ring_arc, LV_OPA_TRANSP, LV_PART_KNOB);
+    lv_obj_clear_flag(ring_arc, LV_OBJ_FLAG_CLICKABLE);
 
-        char buf[16];
-        lv_snprintf(buf, sizeof(buf), "%d %s", v, items[sel].unit);
-        lv_label_set_text(sub_val_lbl, buf);
+    /* ── Big letter ──────────────────────────────────────── */
+    big_lbl = lv_label_create(scr);
+    lv_label_set_text(big_lbl, idle_char);
+    lv_obj_set_style_text_color(big_lbl, lv_color_hex(COL_IDLE), 0);
+    lv_obj_align(big_lbl, LV_ALIGN_CENTER, 0, -15);
 
-        /* Real-time brightness control */
-        if (sel == 3) {
-            extern const uint32_t BrightnessTable[5];
-            uint8_t idx = (uint8_t)v;
-            if (idx > 4) idx = 4;
-            LCD_BrightnessSetting(BrightnessTable[idx]);
-        }
-        LOG_Printf("[UI] %s = %d\r\n", items[sel].name, v);
-    } else if (code == LV_EVENT_CLICKED || code == LV_EVENT_PRESSED) {
-        /* Back to main */
-        lv_group_remove_all_objs(group);
-        lv_group_add_obj(group, main_focus_btn);
-        lv_group_focus_obj(main_focus_btn);
-        refresh_main_screen();
-        lv_scr_load(scr_main);
-    }
-}
+    /* ── Description ─────────────────────────────────────── */
+    desc_lbl = lv_label_create(scr);
+    lv_label_set_text(desc_lbl, idle_desc);
+    lv_obj_set_style_text_color(desc_lbl, lv_color_hex(COL_IDLE), 0);
+    lv_obj_align(desc_lbl, LV_ALIGN_CENTER, 0, 10);
 
-/* ── Build Main Screen ───────────────────────────────────────────────── */
+    /* ── Bottom hint ─────────────────────────────────────── */
+    hint_lbl = lv_label_create(scr);
+    lv_label_set_text(hint_lbl, "encoder input");
+    lv_obj_set_style_text_color(hint_lbl, lv_color_hex(COL_TEXT_DIM), 0);
+    lv_obj_align(hint_lbl, LV_ALIGN_CENTER, 0, 50);
 
-static void build_main_screen(void)
-{
-    scr_main = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(scr_main, lv_color_hex(COL_BG), 0);
-    lv_obj_set_style_bg_opa(scr_main, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(scr_main, 0, 0);
-    lv_obj_clear_flag(scr_main, LV_OBJ_FLAG_SCROLLABLE);
-
-    /* ── Previous item (top, dimmed) ─────────────────────── */
-    main_prev_lbl = lv_label_create(scr_main);
-    lv_obj_set_style_text_color(main_prev_lbl, lv_color_hex(COL_DIM), 0);
-    lv_obj_align(main_prev_lbl, LV_ALIGN_TOP_MID, 0, 45);
-
-    /* ── Center icon (large) ─────────────────────────────── */
-    main_icon_lbl = lv_label_create(scr_main);
-    lv_obj_set_style_text_color(main_icon_lbl, lv_color_hex(COL_ACCENT), 0);
-    lv_obj_align(main_icon_lbl, LV_ALIGN_CENTER, 0, -30);
-
-    /* ── Center name ─────────────────────────────────────── */
-    main_name_lbl = lv_label_create(scr_main);
-    lv_obj_set_style_text_color(main_name_lbl, lv_color_hex(COL_TEXT), 0);
-    lv_obj_align(main_name_lbl, LV_ALIGN_CENTER, 0, -10);
-
-    /* ── Center value ────────────────────────────────────── */
-    main_val_lbl = lv_label_create(scr_main);
-    lv_obj_set_style_text_color(main_val_lbl, lv_color_hex(COL_ACCENT), 0);
-    lv_obj_align(main_val_lbl, LV_ALIGN_CENTER, 0, 10);
-
-    /* ── Next item (bottom, dimmed) ──────────────────────── */
-    main_next_lbl = lv_label_create(scr_main);
-    lv_obj_set_style_text_color(main_next_lbl, lv_color_hex(COL_DIM), 0);
-    lv_obj_align(main_next_lbl, LV_ALIGN_BOTTOM_MID, 0, -45);
-
-    /* ── Dot indicators (horizontal, near bottom) ────────── */
-    int16_t dot_start_x = -(MENU_ITEM_COUNT * 12 - 4) / 2;
-    uint8_t i;
-    for (i = 0; i < MENU_ITEM_COUNT; i++) {
-        main_dot[i] = lv_obj_create(scr_main);
-        lv_obj_set_size(main_dot[i], 8, 8);
-        lv_obj_set_style_radius(main_dot[i], LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_border_width(main_dot[i], 0, 0);
-        lv_obj_set_style_bg_opa(main_dot[i], LV_OPA_COVER, 0);
-        lv_obj_align(main_dot[i], LV_ALIGN_CENTER, dot_start_x + i * 12, 35);
-        lv_obj_clear_flag(main_dot[i], LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-    }
-
-    /* ── Invisible focusable button for encoder input ────── */
-    main_focus_btn = lv_btn_create(scr_main);
-    lv_obj_set_size(main_focus_btn, 1, 1);
-    lv_obj_set_style_bg_opa(main_focus_btn, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(main_focus_btn, 0, 0);
-    lv_obj_set_style_shadow_width(main_focus_btn, 0, 0);
-    lv_obj_set_style_outline_width(main_focus_btn, 0, 0);
-    lv_obj_set_style_outline_width(main_focus_btn, 0, LV_STATE_FOCUSED);
-    lv_obj_align(main_focus_btn, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_add_event_cb(main_focus_btn, main_event_cb, LV_EVENT_ALL, NULL);
-
-    refresh_main_screen();
-}
-
-/* ── Build Sub Screen ────────────────────────────────────────────────── */
-
-static void build_sub_screen(void)
-{
-    scr_sub = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(scr_sub, lv_color_hex(COL_BG), 0);
-    lv_obj_set_style_bg_opa(scr_sub, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(scr_sub, 0, 0);
-    lv_obj_clear_flag(scr_sub, LV_OBJ_FLAG_SCROLLABLE);
-
-    /* ── Title (top center) ──────────────────────────────── */
-    sub_title_lbl = lv_label_create(scr_sub);
-    lv_label_set_text(sub_title_lbl, "");
-    lv_obj_set_style_text_color(sub_title_lbl, lv_color_hex(COL_ACCENT), 0);
-    lv_obj_align(sub_title_lbl, LV_ALIGN_CENTER, 0, -50);
-
-    /* ── Arc indicator ───────────────────────────────────── */
-    sub_arc = lv_arc_create(scr_sub);
-    lv_obj_set_size(sub_arc, 180, 180);
-    lv_obj_align(sub_arc, LV_ALIGN_CENTER, 0, 0);
-    lv_arc_set_rotation(sub_arc, 135);
-    lv_arc_set_bg_angles(sub_arc, 0, 270);
-    lv_arc_set_range(sub_arc, 0, 100);
-    lv_obj_set_style_arc_width(sub_arc, 12, LV_PART_MAIN);
-    lv_obj_set_style_arc_color(sub_arc, lv_color_hex(COL_ARC_BG), LV_PART_MAIN);
-    lv_obj_set_style_arc_width(sub_arc, 12, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_color(sub_arc, lv_color_hex(COL_ACCENT), LV_PART_INDICATOR);
-    /* Hide the knob */
-    lv_obj_set_style_pad_all(sub_arc, 0, LV_PART_KNOB);
-    lv_obj_set_style_bg_opa(sub_arc, LV_OPA_TRANSP, LV_PART_KNOB);
-    lv_obj_add_event_cb(sub_arc, sub_arc_event_cb, LV_EVENT_ALL, NULL);
-
-    /* ── Value label (large, center of arc) ──────────────── */
-    sub_val_lbl = lv_label_create(scr_sub);
-    lv_label_set_text(sub_val_lbl, "0");
-    lv_obj_set_style_text_color(sub_val_lbl, lv_color_hex(COL_TEXT), 0);
-    lv_obj_align(sub_val_lbl, LV_ALIGN_CENTER, 0, 10);
-
-    /* ── Hint text ───────────────────────────────────────── */
-    lv_obj_t *hint = lv_label_create(scr_sub);
-    lv_label_set_text(hint, "press to back");
-    lv_obj_set_style_text_color(hint, lv_color_hex(COL_DIM), 0);
-    lv_obj_align(hint, LV_ALIGN_CENTER, 0, 55);
+    /* ── Invisible focusable button ──────────────────────── */
+    focus_btn = lv_btn_create(scr);
+    lv_obj_set_size(focus_btn, 1, 1);
+    lv_obj_set_style_bg_opa(focus_btn, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(focus_btn, 0, 0);
+    lv_obj_set_style_shadow_width(focus_btn, 0, 0);
+    lv_obj_set_style_outline_width(focus_btn, 0, 0);
+    lv_obj_set_style_outline_width(focus_btn, 0, LV_STATE_FOCUSED);
+    lv_obj_align(focus_btn, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_add_event_cb(focus_btn, enc_event_cb, LV_EVENT_ALL, NULL);
 }
 
 /* ── Public API ──────────────────────────────────────────────────────── */
 
 void ui_menu_init(void)
 {
-    group = lv_group_create();
-    lv_group_set_default(group);
-    lv_indev_set_group(lv_port_indev, group);
+    lv_group_t *group_local = lv_group_create();
+    lv_group_set_default(group_local);
+    lv_indev_set_group(lv_port_indev, group_local);
 
-    build_main_screen();
-    build_sub_screen();
+    build_screen();
 
-    lv_group_add_obj(group, main_focus_btn);
-    lv_group_focus_obj(main_focus_btn);
+    lv_group_add_obj(group_local, focus_btn);
+    lv_group_focus_obj(focus_btn);
 
-    lv_scr_load(scr_main);
-    LOG_Printf("[UI] LVGL menu ready\r\n");
+    /* Fade-back timer (one-shot, starts paused) */
+    fade_tmr = lv_timer_create(fade_timer_cb, INDICATOR_HOLD_MS, NULL);
+    lv_timer_pause(fade_tmr);
+
+    lv_scr_load(scr);
+    LOG_Printf("[UI] Encoder indicator ready\r\n");
 }
