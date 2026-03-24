@@ -10,15 +10,20 @@ and debuggability.
 
 | Parameter | Value |
 |-----------|-------|
-| Interface | UART (USART1 on STM32G070) |
+| Interface | UART (USART3 on STM32G070) |
 | Baud rate | 115200 |
 | Data bits | 8 |
 | Parity | None |
 | Stop bits | 1 |
 | Flow ctrl | None |
-| TX pin | PA9 (USART1_TX, AF1) |
-| RX pin | PA10 (USART1_RX, AF1) |
+| TX pin | PB8 (USART3_TX, AF4) |
+| RX pin | PB9 (USART3_RX, AF4) |
 | Direction | Encoder → Host (TX only, RX reserved) |
+
+> **Note**: USART3 is shared with debug logging. Protocol messages are
+> single uppercase letters (`R`, `L`, `Y`); debug logs always start with `[`.
+> The host parser should only react to known command bytes and ignore all
+> other traffic.
 
 ## Message Format
 
@@ -100,8 +105,8 @@ since they only check the first byte.
 ```
   Encoder Board            Host Board
   ┌──────────┐             ┌──────────┐
-  │ PA9  (TX)│────────────→│ RX       │
-  │ PA10 (RX)│←────────────│ TX       │  (reserved, unused)
+  │ PB8  (TX)│────────────→│ RX       │
+  │ PB9  (RX)│←────────────│ TX       │  (reserved, unused)
   │ GND      │─────────────│ GND      │
   └──────────┘             └──────────┘
 ```
